@@ -12,11 +12,11 @@
     }
   </style>
 
-  <!-- ✅ Three.js 라이브러리 (CDN으로 로드) -->
-  <script src="https://unpkg.com/three@0.165.0/build/three.min.js"></script>
-  <script src="https://unpkg.com/three@0.165.0/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://unpkg.com/three@0.165.0/examples/js/loaders/MTLLoader.js"></script>
-  <script src="https://unpkg.com/three@0.165.0/examples/js/loaders/OBJLoader.js"></script>
+  <!-- ✅ 이제는 CDN이 아니라 로컬(lib)에서 불러옵니다 -->
+  <script src="./libs/three.min.js"></script>
+  <script src="./libs/OrbitControls.js"></script>
+  <script src="./libs/MTLLoader.js"></script>
+  <script src="./libs/OBJLoader.js"></script>
 </head>
 
 <body>
@@ -24,20 +24,19 @@
 
 <script>
 window.addEventListener("load", function() {
-  console.log("✅ Three.js loaded:", typeof THREE);
 
   // ✅ Google Drive 파일 ID
   const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E";
   const MTL_ID = "1KKqx8yjB3B7Hhn_d_2R_R1OsNFQNgwH4";
   const JPG_ID = "1sjRimp26-I2s_yYMQ0Grx_kigeYq5UAh";
 
-  // ✅ 다운로드 URL + CORS 프록시
+  // ✅ Drive 다운로드 URL + CORS 프록시
   const proxy = "https://corsproxy.io/?";
   const objURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${OBJ_ID}`);
   const mtlURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${MTL_ID}`);
   const texURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${JPG_ID}`);
 
-  // === Three.js 초기 설정 ===
+  // === Three.js 기본 세팅 ===
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
 
@@ -52,7 +51,6 @@ window.addEventListener("load", function() {
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  // 조명
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.7);
   scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -65,54 +63,68 @@ window.addEventListener("load", function() {
   const textureLoader = new THREE.TextureLoader();
   const texture = textureLoader.load(texURL);
 
-  // MTL + OBJ 로드
+  // MTL 먼저 로드
   const mtlLoader = new THREE.MTLLoader();
   mtlLoader.load(
     mtlURL,
-    (materials) => {
+    function(materials) {
       materials.preload();
+
+      // mtl에 텍스처가 안 적혀 있으면 jpg 강제로 넣기
       for (const key in materials.materials) {
         const mat = materials.materials[key];
-        if (!mat.map) mat.map = texture;
+        if (mat && !mat.map) {
+          mat.map = texture;
+          mat.needsUpdate = true;
+        }
       }
 
+      // OBJ 로드
       const objLoader = new THREE.OBJLoader();
       objLoader.setMaterials(materials);
       objLoader.load(
         objURL,
-        (object) => {
+        function(object) {
+          // 가운데 맞추기
           const box = new THREE.Box3().setFromObject(object);
           const center = box.getCenter(new THREE.Vector3());
           object.position.sub(center);
+
+          // 크기 조정
           const size = new THREE.Vector3();
           box.getSize(size);
-          const scale = 2 / Math.max(size.x, size.y, size.z);
-          object.scale.setScalar(scale);
+          const maxAxis = Math.max(size.x, size.y, size.z);
+          if (maxAxis > 0) {
+            const scale = 2 / maxAxis;
+            object.scale.setScalar(scale);
+          }
+
           scene.add(object);
           loadingDiv.style.display = "none";
         },
-        (xhr) => {
+        function(xhr) {
           if (xhr.lengthComputable) {
-            loadingDiv.textContent = "Loading OBJ... " + (xhr.loaded / xhr.total * 100).toFixed(0) + "%";
+            const p = xhr.loaded / xhr.total * 100;
+            loadingDiv.textContent = "Loading OBJ... " + p.toFixed(0) + "%";
           } else {
             loadingDiv.textContent = "Loading OBJ...";
           }
         },
-        (err) => {
+        function(err) {
           console.error("OBJ load error:", err);
           loadingDiv.textContent = "OBJ load failed (check Drive sharing)";
         }
       );
     },
     undefined,
-    (err) => {
+    function(err) {
       console.error("MTL load error:", err);
       loadingDiv.textContent = "MTL load failed (check Drive sharing)";
     }
   );
 
-  // 리사이즈 대응
-  window.addEventListener("resize", () => {
+  // 창 크기 바뀔 때
+  window.addEventListener("resize", function() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -125,6 +137,7 @@ window.addEventListener("load", function() {
     renderer.render(scene, camera);
   }
   animate();
+
 });
 </script>
 </body>
