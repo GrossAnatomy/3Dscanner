@@ -2,57 +2,58 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>Google Drive 3D Viewer (OBJ + JPG)</title>
+  <title>3D 진단 페이지</title>
   <style>
     html, body {
       margin: 0;
       height: 100%;
       overflow: hidden;
-      background: #111;
+      background: #000;
+      font-family: sans-serif;
     }
-    #loading {
+    #overlay {
       position: absolute;
       top: 10px;
       left: 10px;
+      z-index: 20;
+      background: rgba(0,0,0,.6);
       color: #fff;
-      background: rgba(0,0,0,.45);
       padding: 6px 10px;
       border-radius: 4px;
-      font-family: sans-serif;
       font-size: 13px;
-      z-index: 10;
+      max-width: 60vw;
     }
   </style>
 
-  <!-- Three.js r110 + Controls + OBJLoader (MTLLoader는 뺍니다) -->
+  <!-- three.js r110 (가능하면 이 CDN이 열려야 합니다) -->
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/loaders/OBJLoader.js"></script>
 </head>
 <body>
-<div id="loading">Loading 3D model from Google Drive...</div>
+  <div id="overlay">초기화 중...</div>
 
 <script>
-window.addEventListener("load", function() {
+(function() {
+  const overlay = document.getElementById('overlay');
 
-  // 1) Google Drive 파일 ID
-  const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E";     // RigilHeart03mm.obj
-  const JPG_ID = "1sjRimp26-I2s_yYMQ0Grx_kigeYq5UAh";    // RigilHeart03mm.jpg
+  // 0) three.js가 아예 안 불러와진 경우
+  if (typeof THREE === "undefined") {
+    overlay.textContent = "three.js를 불러오지 못했습니다. (CDN 차단 여부 확인: cdn.jsdelivr.net)";
+    return;
+  }
 
-  // 2) Drive 원본 URL
-  const driveOBJ = `https://drive.google.com/uc?export=download&id=${OBJ_ID}`;
-  const driveJPG = `https://drive.google.com/uc?export=download&id=${JPG_ID}`;
+  // 1) WebGL 지원 확인
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  if (!gl) {
+    overlay.textContent = "이 브라우저/기기에서 WebGL을 사용할 수 없습니다.";
+    return;
+  }
 
-  // 3) 프록시 붙인 URL
-  const objURL = "https://corsproxy.io/?" + encodeURIComponent(driveOBJ);
-
-  // JPG는 allorigins 먼저, 안 되면 원본
-  const texURLPrimary = "https://api.allorigins.win/raw?url=" + encodeURIComponent(driveJPG);
-  const texURLFallback = driveJPG;
-
-  // === Three.js 기본 세팅 ===
+  // 2) 기본 씬
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111111);
+  scene.background = new THREE.Color(0x222222);
 
   const camera = new THREE.PerspectiveCamera(
     45,
@@ -60,97 +61,87 @@ window.addEventListener("load", function() {
     0.1,
     1000
   );
-  camera.position.set(0, 0.5, 3);
+  camera.position.set(0, 1.2, 4);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
   document.body.appendChild(renderer.domElement);
 
+  // 3) 컨트롤
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.7));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  // 4) 조명
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 0.8));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
   dir.position.set(3, 4, 5);
   scene.add(dir);
 
-  const loadingDiv = document.getElementById("loading");
+  // 5) 반드시 보이는 테스트 오브젝트
+  const testGeo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+  const testMat = new THREE.MeshStandardMaterial({ color: 0x33aaff, roughness: 0.4 });
+  const testCube = new THREE.Mesh(testGeo, testMat);
+  scene.add(testCube);
 
-  // 4) 텍스처 먼저 준비
-  const textureLoader = new THREE.TextureLoader();
-  let driveTexture = textureLoader.load(
-    texURLPrimary,
-    undefined,
-    undefined,
-    function() {
-      // 프록시가 실패하면 Drive 원본으로 다시 시도
-      driveTexture = textureLoader.load(texURLFallback);
-    }
-  );
+  // 바닥 격자
+  const grid = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
+  grid.position.y = -1;
+  scene.add(grid);
 
-  // 5) OBJ 로드
+  overlay.textContent = "기본 3D는 정상입니다. (OBJ는 아직 안 불러옴)";
+
+  // 6) 이제 Drive OBJ 시도 (안 되면 그냥 큐브만 보여줌)
+  const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E"; // 사용자가 준 ID
+  const driveOBJ = `https://drive.google.com/uc?export=download&id=${OBJ_ID}`;
+  const objURL = "https://corsproxy.io/?" + encodeURIComponent(driveOBJ);
+
   const objLoader = new THREE.OBJLoader();
   objLoader.load(
     objURL,
     function(object) {
-
-      // 모델 전체에 우리가 불러온 텍스처를 입힌 머티리얼 적용
-      const material = new THREE.MeshPhongMaterial({
-        map: driveTexture
-      });
-
-      object.traverse(function(child) {
-        if (child.isMesh) {
-          child.material = material;
-        }
-      });
-
-      // 가운데 정렬
+      // 중심 맞추고 크기 맞춤
       const box = new THREE.Box3().setFromObject(object);
       const center = box.getCenter(new THREE.Vector3());
       object.position.sub(center);
-
-      // 크기 조정
       const size = new THREE.Vector3();
       box.getSize(size);
       const maxAxis = Math.max(size.x, size.y, size.z);
-      if (maxAxis > 0) {
-        object.scale.setScalar(2 / maxAxis);
-      }
+      if (maxAxis > 0) object.scale.setScalar(2 / maxAxis);
 
+      // 큐브 대신 OBJ 표시
+      scene.remove(testCube);
       scene.add(object);
-      loadingDiv.style.display = "none";
+      overlay.textContent = "OBJ까지 로드되었습니다.";
     },
     function(xhr) {
+      // 진행률 표시
       if (xhr.lengthComputable) {
-        const p = xhr.loaded / xhr.total * 100;
-        loadingDiv.textContent = "Loading OBJ... " + p.toFixed(0) + "%";
+        overlay.textContent = "OBJ 로딩 중... " + (xhr.loaded / xhr.total * 100).toFixed(0) + "%";
       } else {
-        loadingDiv.textContent = "Loading OBJ...";
+        overlay.textContent = "OBJ 로딩 중...";
       }
     },
     function(err) {
-      console.error("OBJ load error:", err);
-      loadingDiv.textContent = "OBJ load failed (check sharing / proxy)";
+      console.log("OBJ 로드 실패:", err);
+      overlay.textContent = "기본 3D는 정상입니다. (OBJ는 Drive/프록시에서 받지 못했습니다)";
     }
   );
 
-  // 6) 리사이즈 대응
+  // 7) 리사이즈
   window.addEventListener("resize", function() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // 7) 렌더 루프
+  // 8) 렌더 루프
   (function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
   })();
-
-});
+})();
 </script>
 </body>
 </html>
