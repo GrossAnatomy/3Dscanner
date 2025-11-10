@@ -12,7 +12,7 @@
     }
   </style>
 
-  <!-- ✅ Three.js 및 필요한 loader, controls를 CDN으로 직접 불러오기 -->
+  <!-- ✅ Three.js 라이브러리 (CDN으로 로드) -->
   <script src="https://unpkg.com/three@0.165.0/build/three.min.js"></script>
   <script src="https://unpkg.com/three@0.165.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://unpkg.com/three@0.165.0/examples/js/loaders/MTLLoader.js"></script>
@@ -23,21 +23,21 @@
 <div id="loading">Loading 3D model from Google Drive...</div>
 
 <script>
+window.addEventListener("load", function() {
+  console.log("✅ Three.js loaded:", typeof THREE);
+
   // ✅ Google Drive 파일 ID
   const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E";
   const MTL_ID = "1KKqx8yjB3B7Hhn_d_2R_R1OsNFQNgwH4";
   const JPG_ID = "1sjRimp26-I2s_yYMQ0Grx_kigeYq5UAh";
 
-  // ✅ 다운로드 URL (프록시로 CORS 우회)
+  // ✅ 다운로드 URL + CORS 프록시
   const proxy = "https://corsproxy.io/?";
-  const driveObj = `https://drive.google.com/uc?export=download&id=${OBJ_ID}`;
-  const driveMtl = `https://drive.google.com/uc?export=download&id=${MTL_ID}`;
-  const driveJpg = `https://drive.google.com/uc?export=download&id=${JPG_ID}`;
-  const objURL = proxy + encodeURIComponent(driveObj);
-  const mtlURL = proxy + encodeURIComponent(driveMtl);
-  const texURL = proxy + encodeURIComponent(driveJpg);
+  const objURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${OBJ_ID}`);
+  const mtlURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${MTL_ID}`);
+  const texURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${JPG_ID}`);
 
-  // === Three.js ===
+  // === Three.js 초기 설정 ===
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x111111);
 
@@ -52,6 +52,7 @@
   const controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
 
+  // 조명
   const hemi = new THREE.HemisphereLight(0xffffff, 0x222222, 0.7);
   scene.add(hemi);
   const dir = new THREE.DirectionalLight(0xffffff, 0.85);
@@ -60,50 +61,71 @@
 
   const loadingDiv = document.getElementById("loading");
 
+  // 텍스처
   const textureLoader = new THREE.TextureLoader();
   const texture = textureLoader.load(texURL);
 
+  // MTL + OBJ 로드
   const mtlLoader = new THREE.MTLLoader();
-  mtlLoader.load(mtlURL, (materials) => {
-    materials.preload();
-    for (const key in materials.materials) {
-      const mat = materials.materials[key];
-      if (!mat.map) mat.map = texture;
+  mtlLoader.load(
+    mtlURL,
+    (materials) => {
+      materials.preload();
+      for (const key in materials.materials) {
+        const mat = materials.materials[key];
+        if (!mat.map) mat.map = texture;
+      }
+
+      const objLoader = new THREE.OBJLoader();
+      objLoader.setMaterials(materials);
+      objLoader.load(
+        objURL,
+        (object) => {
+          const box = new THREE.Box3().setFromObject(object);
+          const center = box.getCenter(new THREE.Vector3());
+          object.position.sub(center);
+          const size = new THREE.Vector3();
+          box.getSize(size);
+          const scale = 2 / Math.max(size.x, size.y, size.z);
+          object.scale.setScalar(scale);
+          scene.add(object);
+          loadingDiv.style.display = "none";
+        },
+        (xhr) => {
+          if (xhr.lengthComputable) {
+            loadingDiv.textContent = "Loading OBJ... " + (xhr.loaded / xhr.total * 100).toFixed(0) + "%";
+          } else {
+            loadingDiv.textContent = "Loading OBJ...";
+          }
+        },
+        (err) => {
+          console.error("OBJ load error:", err);
+          loadingDiv.textContent = "OBJ load failed (check Drive sharing)";
+        }
+      );
+    },
+    undefined,
+    (err) => {
+      console.error("MTL load error:", err);
+      loadingDiv.textContent = "MTL load failed (check Drive sharing)";
     }
+  );
 
-    const objLoader = new THREE.OBJLoader();
-    objLoader.setMaterials(materials);
-    objLoader.load(objURL, (object) => {
-      const box = new THREE.Box3().setFromObject(object);
-      const center = box.getCenter(new THREE.Vector3());
-      object.position.sub(center);
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      const scale = 2 / Math.max(size.x, size.y, size.z);
-      object.scale.setScalar(scale);
-      scene.add(object);
-      loadingDiv.style.display = "none";
-    }, undefined, (err) => {
-      console.error(err);
-      loadingDiv.textContent = "OBJ load failed";
-    });
-  }, undefined, (err) => {
-    console.error(err);
-    loadingDiv.textContent = "MTL load failed";
-  });
-
+  // 리사이즈 대응
   window.addEventListener("resize", () => {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
+  // 렌더 루프
   function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
   }
   animate();
+});
 </script>
 </body>
 </html>
