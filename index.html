@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>Google Drive 3D Viewer</title>
+  <title>Google Drive 3D Viewer (OBJ + JPG)</title>
   <style>
     html, body {
       margin: 0;
@@ -24,145 +24,133 @@
     }
   </style>
 
-  <!-- ✅ Three.js r110 (구 구조, 예제 로더 포함) -->
+  <!-- Three.js r110 + Controls + OBJLoader (MTLLoader는 뺍니다) -->
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/loaders/MTLLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/loaders/OBJLoader.js"></script>
 </head>
 <body>
-  <div id="loading">Loading 3D model from Google Drive...</div>
+<div id="loading">Loading 3D model from Google Drive...</div>
 
-  <script>
-  // 모든 스크립트가 로드된 후 실행
-  window.addEventListener("load", function() {
+<script>
+window.addEventListener("load", function() {
 
-    // 1. Google Drive에 있는 파일 ID
-    const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E";
-    const MTL_ID = "1KKqx8yjB3B7Hhn_d_2R_R1OsNFQNgwH4";
-    const JPG_ID = "1sjRimp26-I2s_yYMQ0Grx_kigeYq5UAh";
+  // 1) Google Drive 파일 ID
+  const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E";     // RigilHeart03mm.obj
+  const JPG_ID = "1sjRimp26-I2s_yYMQ0Grx_kigeYq5UAh";    // RigilHeart03mm.jpg
 
-    // 2. Drive 다운로드 링크 + CORS 프록시
-    const proxy = "https://corsproxy.io/?";
-    const objURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${OBJ_ID}`);
-    const mtlURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${MTL_ID}`);
-    const texURL = proxy + encodeURIComponent(`https://drive.google.com/uc?export=download&id=${JPG_ID}`);
+  // 2) Drive 원본 URL
+  const driveOBJ = `https://drive.google.com/uc?export=download&id=${OBJ_ID}`;
+  const driveJPG = `https://drive.google.com/uc?export=download&id=${JPG_ID}`;
 
-    // 3. Three.js 기본 세팅
-    const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x111111);
+  // 3) 프록시 붙인 URL
+  const objURL = "https://corsproxy.io/?" + encodeURIComponent(driveOBJ);
 
-    const camera = new THREE.PerspectiveCamera(
-      45,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      1000
-    );
-    camera.position.set(0, 0.5, 3);
+  // JPG는 allorigins 먼저, 안 되면 원본
+  const texURLPrimary = "https://api.allorigins.win/raw?url=" + encodeURIComponent(driveJPG);
+  const texURLFallback = driveJPG;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    document.body.appendChild(renderer.domElement);
+  // === Three.js 기본 세팅 ===
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111111);
 
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
+  const camera = new THREE.PerspectiveCamera(
+    45,
+    window.innerWidth / window.innerHeight,
+    0.1,
+    1000
+  );
+  camera.position.set(0, 0.5, 3);
 
-    // 조명
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.7));
-    const dir = new THREE.DirectionalLight(0xffffff, 0.85);
-    dir.position.set(3, 4, 5);
-    scene.add(dir);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+  document.body.appendChild(renderer.domElement);
 
-    const loadingDiv = document.getElementById("loading");
+  const controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
 
-    // 4. 텍스처 로더 (Drive의 jpg 경로 사용)
-    const textureLoader = new THREE.TextureLoader();
-    const texture = textureLoader.load(
-      texURL,
-      function() {
-        // 텍스처까지 정상
-      },
-      undefined,
-      function(err) {
-        console.log("Texture load error:", err);
-      }
-    );
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.7));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir.position.set(3, 4, 5);
+  scene.add(dir);
 
-    // 5. MTL 먼저 로드
-    const mtlLoader = new THREE.MTLLoader();
-    mtlLoader.load(
-      mtlURL,
-      function (materials) {
-        materials.preload();
+  const loadingDiv = document.getElementById("loading");
 
-        // mtl 안에 텍스처가 안 적혀 있으면 우리가 강제로 넣어줌
-        for (const key in materials.materials) {
-          const mat = materials.materials[key];
-          if (mat && !mat.map) {
-            mat.map = texture;
-            mat.needsUpdate = true;
-          }
+  // 4) 텍스처 먼저 준비
+  const textureLoader = new THREE.TextureLoader();
+  let driveTexture = textureLoader.load(
+    texURLPrimary,
+    undefined,
+    undefined,
+    function() {
+      // 프록시가 실패하면 Drive 원본으로 다시 시도
+      driveTexture = textureLoader.load(texURLFallback);
+    }
+  );
+
+  // 5) OBJ 로드
+  const objLoader = new THREE.OBJLoader();
+  objLoader.load(
+    objURL,
+    function(object) {
+
+      // 모델 전체에 우리가 불러온 텍스처를 입힌 머티리얼 적용
+      const material = new THREE.MeshPhongMaterial({
+        map: driveTexture
+      });
+
+      object.traverse(function(child) {
+        if (child.isMesh) {
+          child.material = material;
         }
+      });
 
-        const objLoader = new THREE.OBJLoader();
-        objLoader.setMaterials(materials);
-        objLoader.load(
-          objURL,
-          function (object) {
-            // 가운데 정렬
-            const box = new THREE.Box3().setFromObject(object);
-            const center = box.getCenter(new THREE.Vector3());
-            object.position.sub(center); // 중심을 원점으로
+      // 가운데 정렬
+      const box = new THREE.Box3().setFromObject(object);
+      const center = box.getCenter(new THREE.Vector3());
+      object.position.sub(center);
 
-            // 크기 조정 (가장 긴 변을 2로 맞추기)
-            const size = new THREE.Vector3();
-            box.getSize(size);
-            const maxAxis = Math.max(size.x, size.y, size.z);
-            if (maxAxis > 0) {
-              object.scale.setScalar(2 / maxAxis);
-            }
-
-            scene.add(object);
-            loadingDiv.style.display = "none";
-          },
-          function (xhr) {
-            // 로딩 진행률 표시
-            if (xhr.lengthComputable) {
-              const percent = (xhr.loaded / xhr.total) * 100;
-              loadingDiv.textContent = "Loading OBJ... " + percent.toFixed(0) + "%";
-            } else {
-              loadingDiv.textContent = "Loading OBJ...";
-            }
-          },
-          function (error) {
-            console.error("OBJ load error:", error);
-            loadingDiv.textContent = "OBJ load failed (check Drive sharing)";
-          }
-        );
-      },
-      undefined,
-      function (error) {
-        console.error("MTL load error:", error);
-        loadingDiv.textContent = "MTL load failed (check Drive sharing)";
+      // 크기 조정
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const maxAxis = Math.max(size.x, size.y, size.z);
+      if (maxAxis > 0) {
+        object.scale.setScalar(2 / maxAxis);
       }
-    );
 
-    // 6. 창 크기 변경 대응
-    window.addEventListener("resize", function() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+      scene.add(object);
+      loadingDiv.style.display = "none";
+    },
+    function(xhr) {
+      if (xhr.lengthComputable) {
+        const p = xhr.loaded / xhr.total * 100;
+        loadingDiv.textContent = "Loading OBJ... " + p.toFixed(0) + "%";
+      } else {
+        loadingDiv.textContent = "Loading OBJ...";
+      }
+    },
+    function(err) {
+      console.error("OBJ load error:", err);
+      loadingDiv.textContent = "OBJ load failed (check sharing / proxy)";
+    }
+  );
 
-    // 7. 렌더 루프
-    (function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    })();
-
+  // 6) 리사이즈 대응
+  window.addEventListener("resize", function() {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
   });
-  </script>
+
+  // 7) 렌더 루프
+  (function animate() {
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  })();
+
+});
+</script>
 </body>
 </html>
