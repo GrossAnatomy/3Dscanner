@@ -2,121 +2,281 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8" />
-  <title>Drive OBJ Viewer via GAS</title>
+  <title>OBJ · MTL · JPG 뷰어</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    html, body { margin:0; height:100%; overflow:hidden; background:#111; }
-    #loading {
-      position:absolute; top:10px; left:10px; z-index:10;
-      background:rgba(0,0,0,.45); color:#fff; padding:6px 10px; border-radius:4px;
-      font-family:sans-serif; font-size:13px;
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #050505;
+      font-family: "Pretendard", "Noto Sans KR", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #fff;
+    }
+    body { display: flex; flex-direction: column; }
+    header {
+      padding: 14px 22px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(120deg, #181818, #0f0f0f);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.6);
+      z-index: 10;
+    }
+    h1 { margin: 0 0 6px; font-weight: 600; font-size: 20px; }
+    p { margin: 0; font-size: 14px; color: rgba(255,255,255,0.72); }
+    #drop-zone {
+      border: 2px dashed rgba(255,255,255,0.3);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    #drop-zone.dragover {
+      background: rgba(255,255,255,0.08);
+      border-color: #52ffa6;
+    }
+    #drop-zone button {
+      background: #52a7ff;
+      border: none;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    #drop-zone small { color: rgba(255,255,255,0.7); }
+    #status { margin-top: 6px; font-size: 13px; color: #a8ffcb; min-height: 18px; }
+    #viewer {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+    }
+    canvas { display: block; }
+    #hint {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      padding: 6px 10px;
+      border-radius: 4px;
+      background: rgba(0, 0, 0, 0.4);
+      font-size: 12px;
+      letter-spacing: 0.03em;
     }
   </style>
-  <!-- Three.js r110 (구조 단순, OBJLoader 포함) -->
-  <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/controls/OrbitControls.js"></script>
-  <script src="https://cdn.jsdelivr.net/gh/mrdoob/three.js@r110/examples/js/loaders/OBJLoader.js"></script>
+  <script src="libs/three.min.js"></script>
+  <script src="libs/OrbitControls.js"></script>
+  <script src="libs/MTLLoader.js"></script>
+  <script src="libs/OBJLoader.js"></script>
 </head>
 <body>
-<div id="loading">Loading from Google Drive…</div>
+  <header>
+    <h1>OBJ · MTL · JPG 뷰어</h1>
+    <p>obj, mtl, jpg(또는 png) 파일을 모두 선택해 드래그&드롭하거나 아래 버튼으로 불러오세요.</p>
+    <div id="drop-zone">
+      <button id="select-btn">파일 선택</button>
+      <div>
+        <strong>드롭 가능</strong>
+        <small>한 번에 같은 모델의 obj + mtl + 텍스처를 선택하세요.</small>
+      </div>
+      <input type="file" id="file-input" multiple accept=".obj,.mtl,.jpg,.jpeg,.png" hidden />
+    </div>
+    <div id="status"></div>
+  </header>
+  <div id="viewer">
+    <div id="hint">마우스로 회전 / 휠로 줌</div>
+  </div>
 
 <script>
-window.addEventListener("load", function() {
-  // 1) Drive 파일 ID
-  const OBJ_ID = "1uLNxVBnxp20Xn0anhrjG4YDkQPbHUi1E";   // RigilHeart03mm.obj
-  const JPG_ID = "1sjRimp26-I2s_yYMQ0Grx_kigeYq5UAh";   // RigilHeart03mm.jpg
+(function() {
+  const viewer = document.getElementById("viewer");
+  const dropZone = document.getElementById("drop-zone");
+  const fileInput = document.getElementById("file-input");
+  const selectBtn = document.getElementById("select-btn");
+  const statusEl = document.getElementById("status");
 
-  // 2) 방금 만든 Apps Script 웹앱 주소
-  const GAS_BASE = "https://script.google.com/macros/s/AKfycbwd6GJNIGJuhM8x00Kd2IrB3ew8xlCcwW8aiczpBfox17tqP3_6BdLy_wlV5kgs7HgS/exec";  // ← 여기에 본인 앱스스クリ프트 URL
+  let renderer, scene, camera, controls, currentModel;
 
-  // 3) 프록시를 통과한 실제 다운로드 주소
-  const objURL = GAS_BASE + "?id=" + encodeURIComponent(OBJ_ID);
-  const texURL = GAS_BASE + "?id=" + encodeURIComponent(JPG_ID);
+  initThree();
 
-  // === Three.js 기본 세팅 ===
-  const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x111111);
+  selectBtn.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", e => handleFiles(e.target.files));
 
-  const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 1.2, 4);
-
-  const renderer = new THREE.WebGLRenderer({antialias:true});
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(window.devicePixelRatio);
-  document.body.appendChild(renderer.domElement);
-
-  const controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-
-  scene.add(new THREE.HemisphereLight(0xffffff, 0x333333, 0.9));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-  dir.position.set(3,4,5);
-  scene.add(dir);
-
-  const loadingDiv = document.getElementById("loading");
-
-  // 4) 텍스처 먼저
-  const texLoader = new THREE.TextureLoader();
-  const driveTexture = texLoader.load(texURL);
-
-  // 5) OBJ 로드
-  const objLoader = new THREE.OBJLoader();
-  objLoader.load(
-    objURL,
-    function(object) {
-      // OBJ가 온 경우에만 여기 들어옴
-
-      // 텍스처 적용
-      const mat = new THREE.MeshPhongMaterial({ map: driveTexture, color: 0xffffff });
-      object.traverse(function(child) {
-        if (child.isMesh) {
-          child.material = mat;
-        }
-      });
-
-      // 가운데 맞추기
-      const box = new THREE.Box3().setFromObject(object);
-      const center = box.getCenter(new THREE.Vector3());
-      object.position.sub(center);
-
-      // 크기 맞추기
-      const size = new THREE.Vector3();
-      box.getSize(size);
-      const maxAxis = Math.max(size.x, size.y, size.z);
-      if (maxAxis > 0) {
-        object.scale.setScalar(2 / maxAxis);
-      }
-
-      scene.add(object);
-      loadingDiv.style.display = "none";
-    },
-    function(xhr) {
-      if (xhr.lengthComputable) {
-        const p = xhr.loaded / xhr.total * 100;
-        loadingDiv.textContent = "Loading OBJ... " + p.toFixed(0) + "%";
-      } else {
-        loadingDiv.textContent = "Loading OBJ...";
-      }
-    },
-    function(err) {
-      console.error("OBJ load error:", err);
-      loadingDiv.textContent = "OBJ load failed (check GAS permissions)";
+  ["dragenter", "dragover"].forEach(type => dropZone.addEventListener(type, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.add("dragover");
+  }));
+  ["dragleave", "drop"].forEach(type => dropZone.addEventListener(type, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (type === "drop") {
+      handleFiles(e.dataTransfer.files);
     }
-  );
+    dropZone.classList.remove("dragover");
+  }));
 
-  // 리사이즈
-  window.addEventListener("resize", function() {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  function initThree() {
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x050505);
 
-  // 렌더
-  (function animate() {
+    camera = new THREE.PerspectiveCamera(50, viewer.clientWidth / viewer.clientHeight, 0.1, 2000);
+    camera.position.set(0, 1, 4);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setSize(viewer.clientWidth, viewer.clientHeight);
+    viewer.appendChild(renderer.domElement);
+
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.06;
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x222222, 0.9));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+    dirLight.position.set(5, 8, 10);
+    scene.add(dirLight);
+
+    window.addEventListener("resize", () => {
+      const { clientWidth, clientHeight } = viewer;
+      camera.aspect = clientWidth / clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(clientWidth, clientHeight);
+    });
+
+    animate();
+  }
+
+  function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
-  })();
-});
+  }
+
+  function handleFiles(fileList) {
+    if (!fileList || !fileList.length) {
+      return;
+    }
+
+    const files = Array.from(fileList);
+    const objFile = files.find(f => f.name.toLowerCase().endsWith(".obj"));
+
+    if (!objFile) {
+      setStatus("OBJ 파일이 필요합니다.");
+      return;
+    }
+
+    setStatus("파일 준비 중…");
+
+    clearModel();
+
+    const blobMap = new Map();
+    const revokeList = [];
+    files.forEach(file => {
+      const url = URL.createObjectURL(file);
+      blobMap.set(file.name.toLowerCase(), url);
+      revokeList.push(url);
+    });
+
+    const manager = new THREE.LoadingManager();
+    manager.onStart = () => setStatus("로드 중…");
+    manager.onProgress = (_, loaded, total) => {
+      setStatus(`불러오는 중 ${loaded}/${total}`);
+    };
+    manager.onLoad = () => {
+      setStatus("로드 완료");
+      setTimeout(() => setStatus(""), 1500);
+    };
+
+    manager.setURLModifier(url => {
+      const clean = url.replace(/^\.?\/*/, "").split(/[?#]/)[0].toLowerCase();
+      return blobMap.get(clean) || url;
+    });
+
+    const objLoader = new THREE.OBJLoader(manager);
+
+    const mtlFile = files.find(f => f.name.toLowerCase().endsWith(".mtl"));
+
+    const objURL = blobMap.get(objFile.name.toLowerCase());
+
+    const finalize = () => revokeList.forEach(url => URL.revokeObjectURL(url));
+
+    const onLoaded = object => {
+      fitAndAdd(object);
+      finalize();
+    };
+
+    const onError = err => {
+      console.error(err);
+      setStatus("로드 실패 - 파일 구성을 확인하세요.");
+      finalize();
+    };
+
+    if (mtlFile) {
+      const mtlLoader = new THREE.MTLLoader(manager);
+      const mtlURL = blobMap.get(mtlFile.name.toLowerCase());
+      mtlLoader.load(mtlURL, materials => {
+        materials.preload();
+        objLoader.setMaterials(materials);
+        objLoader.load(objURL, onLoaded, undefined, onError);
+      }, undefined, onError);
+    } else {
+      objLoader.load(objURL, onLoaded, undefined, onError);
+    }
+  }
+
+  function fitAndAdd(object) {
+    object.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = child.receiveShadow = true;
+      }
+    });
+
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+
+    object.position.sub(center);
+
+    const maxAxis = Math.max(size.x, size.y, size.z);
+    if (maxAxis > 0) {
+      const scale = 2.5 / maxAxis;
+      object.scale.setScalar(scale);
+    }
+
+    controls.target.copy(new THREE.Vector3());
+    controls.update();
+
+    currentModel = object;
+    scene.add(object);
+  }
+
+  function clearModel() {
+    if (!currentModel) return;
+    scene.remove(currentModel);
+    currentModel.traverse(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(mat => {
+          for (const key in mat) {
+            const value = mat[key];
+            if (value && typeof value === "object" && "minFilter" in value) {
+              value.dispose?.();
+            }
+          }
+          mat.dispose?.();
+        });
+      }
+    });
+    currentModel = null;
+  }
+
+  function setStatus(text) {
+    statusEl.textContent = text || "";
+  }
+})();
 </script>
 </body>
 </html>
